@@ -1,163 +1,153 @@
-# import the necessary packages
-from scipy.spatial import distance as dist
 from collections import OrderedDict
+
 import numpy as np
+from scipy.spatial import distance as dist
+
 
 class CentroidTracker:
-	def __init__(self, maxDisappeared=50, maxDistance=50):
-		# initialize the next unique object ID along with two ordered
-		# dictionaries used to keep track of mapping a given object
-		# ID to its centroid and number of consecutive frames it has
-		# been marked as "disappeared", respectively
-		self.nextObjectID = 0
-		self.objects = OrderedDict()
-		self.disappeared = OrderedDict()
+    """
+    Tracker don gian dua tren tam (centroid) cua bounding box.
 
-		# store the number of maximum consecutive frames a given
-		# object is allowed to be marked as "disappeared" until we
-		# need to deregister the object from tracking
-		self.maxDisappeared = maxDisappeared
+    Y tuong:
+    - Moi doi tuong duoc gan mot ID.
+    - O moi frame, tinh centroid cua cac bbox moi.
+    - Ghep centroid moi voi centroid cu bang khoang cach Euclid nho nhat.
+    - Neu mot doi tuong mat qua nhieu frame lien tiep thi xoa khoi tracker.
+    """
 
-		# store the maximum distance between centroids to associate
-		# an object -- if the distance is larger than this maximum
-		# distance we'll start to mark the object as "disappeared"
-		self.maxDistance = maxDistance
+    def __init__(self, maxDisappeared=50, maxDistance=50):
+        # Giu nguyen ten tham so de tuong thich voi code cu
+        if maxDisappeared < 0:
+            raise ValueError("maxDisappeared phai >= 0")
+        if maxDistance < 0:
+            raise ValueError("maxDistance phai >= 0")
 
-	def register(self, centroid):
-		# when registering an object we use the next available object
-		# ID to store the centroid
-		self.objects[self.nextObjectID] = centroid
-		self.disappeared[self.nextObjectID] = 0
-		self.nextObjectID += 1
+        # ID se duoc tang dan moi khi dang ky doi tuong moi
+        self.nextObjectID = 0
 
-	def deregister(self, objectID):
-		# to deregister an object ID we delete the object ID from
-		# both of our respective dictionaries
-		del self.objects[objectID]
-		del self.disappeared[objectID]
+        # objects[objectID] = (cX, cY)
+        self.objects = OrderedDict()
 
-	def update(self, rects):
-		# check to see if the list of input bounding box rectangles
-		# is empty
-		if len(rects) == 0:
-			# loop over any existing tracked objects and mark them
-			# as disappeared
-			for objectID in list(self.disappeared.keys()):
-				self.disappeared[objectID] += 1
+        # disappeared[objectID] = so frame lien tiep khong thay doi tuong
+        self.disappeared = OrderedDict()
 
-				# if we have reached a maximum number of consecutive
-				# frames where a given object has been marked as
-				# missing, deregister it
-				if self.disappeared[objectID] > self.maxDisappeared:
-					self.deregister(objectID)
+        # Cau hinh tracker
+        self.maxDisappeared = int(maxDisappeared)
+        self.maxDistance = float(maxDistance)
 
-			# return early as there are no centroids or tracking info
-			# to update
-			return self.objects
+    def register(self, centroid):
+        # Dang ky doi tuong moi va reset bo dem mat tich
+        centroid = self._as_centroid_tuple(centroid)
+        self.objects[self.nextObjectID] = centroid
+        self.disappeared[self.nextObjectID] = 0
+        self.nextObjectID += 1
 
-		# initialize an array of input centroids for the current frame
-		inputCentroids = np.zeros((len(rects), 2), dtype="int")
+    def deregister(self, objectID):
+        # Xoa doi tuong khoi tracker
+        if objectID in self.objects:
+            del self.objects[objectID]
+        if objectID in self.disappeared:
+            del self.disappeared[objectID]
 
-		# loop over the bounding box rectangles
-		for (i, (startX, startY, endX, endY)) in enumerate(rects):
-			# use the bounding box coordinates to derive the centroid
-			cX = int((startX + endX) / 2.0)
-			cY = int((startY + endY) / 2.0)
-			inputCentroids[i] = (cX, cY)
+    def reset(self):
+        # Xoa toan bo trang thai tracker, dung khi doi video/nguon
+        self.nextObjectID = 0
+        self.objects.clear()
+        self.disappeared.clear()
 
-		# if we are currently not tracking any objects take the input
-		# centroids and register each of them
-		if len(self.objects) == 0:
-			for i in range(0, len(inputCentroids)):
-				self.register(inputCentroids[i])
+    def _mark_missing(self, objectID):
+        # Tang bo dem mat tich; neu vuot nguong thi xoa doi tuong
+        self.disappeared[objectID] += 1
+        if self.disappeared[objectID] > self.maxDisappeared:
+            self.deregister(objectID)
 
-		# otherwise, are are currently tracking objects so we need to
-		# try to match the input centroids to existing object
-		# centroids
-		else:
-			# grab the set of object IDs and corresponding centroids
-			objectIDs = list(self.objects.keys())
-			objectCentroids = list(self.objects.values())
+    @staticmethod
+    def _as_centroid_tuple(centroid):
+        # Chuan hoa centroid thanh tuple int de de so sanh / ve
+        return int(centroid[0]), int(centroid[1])
 
-			# compute the distance between each pair of object
-			# centroids and input centroids, respectively -- our
-			# goal will be to match an input centroid to an existing
-			# object centroid
-			D = dist.cdist(np.array(objectCentroids), inputCentroids)
+    @staticmethod
+    def _build_input_centroids(rects):
+        # Chuyen danh sach bbox (x1, y1, x2, y2) thanh mang centroid [N, 2]
+        input_centroids = np.zeros((len(rects), 2), dtype=np.int32)
+        for i, (startX, startY, endX, endY) in enumerate(rects):
+            cX = int((startX + endX) / 2.0)
+            cY = int((startY + endY) / 2.0)
+            input_centroids[i] = (cX, cY)
+        return input_centroids
 
-			# in order to perform this matching we must (1) find the
-			# smallest value in each row and then (2) sort the row
-			# indexes based on their minimum values so that the row
-			# with the smallest value as at the *front* of the index
-			# list
-			rows = D.min(axis=1).argsort()
+    def update(self, rects):
+        """
+        Cap nhat tracker voi cac bbox cua frame hien tai.
 
-			# next, we perform a similar process on the columns by
-			# finding the smallest value in each column and then
-			# sorting using the previously computed row index list
-			cols = D.argmin(axis=1)[rows]
+        Dau vao:
+        - rects: danh sach bbox, moi bbox co dang (x1, y1, x2, y2)
 
-			# in order to determine if we need to update, register,
-			# or deregister an object we need to keep track of which
-			# of the rows and column indexes we have already examined
-			usedRows = set()
-			usedCols = set()
+        Dau ra:
+        - OrderedDict {objectID: (cX, cY)}
+        """
+        if rects is None:
+            rects = []
+        else:
+            rects = list(rects)
 
-			# loop over the combination of the (row, column) index
-			# tuples
-			for (row, col) in zip(rows, cols):
-				# if we have already examined either the row or
-				# column value before, ignore it
-				if row in usedRows or col in usedCols:
-					continue
+        # Khong co bbox nao: danh dau tat ca doi tuong la mat tam thoi
+        if len(rects) == 0:
+            for objectID in list(self.disappeared.keys()):
+                self._mark_missing(objectID)
+            return self.objects
 
-				# if the distance between centroids is greater than
-				# the maximum distance, do not associate the two
-				# centroids to the same object
-				if D[row, col] > self.maxDistance:
-					continue
+        inputCentroids = self._build_input_centroids(rects)
 
-				# otherwise, grab the object ID for the current row,
-				# set its new centroid, and reset the disappeared
-				# counter
-				objectID = objectIDs[row]
-				self.objects[objectID] = inputCentroids[col]
-				self.disappeared[objectID] = 0
+        # Chua co doi tuong nao -> dang ky tat ca centroid moi
+        if len(self.objects) == 0:
+            for centroid in inputCentroids:
+                self.register(centroid)
+            return self.objects
 
-				# indicate that we have examined each of the row and
-				# column indexes, respectively
-				usedRows.add(row)
-				usedCols.add(col)
+        # Lay danh sach ID va centroid dang duoc theo doi
+        objectIDs = list(self.objects.keys())
+        objectCentroids = np.array(list(self.objects.values()), dtype=np.int32)
 
-			# compute both the row and column index we have NOT yet
-			# examined
-			unusedRows = set(range(0, D.shape[0])).difference(usedRows)
-			unusedCols = set(range(0, D.shape[1])).difference(usedCols)
+        # Ma tran khoang cach giua centroid cu va centroid moi
+        D = dist.cdist(objectCentroids, inputCentroids)
 
-			# in the event that the number of object centroids is
-			# equal or greater than the number of input centroids
-			# we need to check and see if some of these objects have
-			# potentially disappeared
-			if D.shape[0] >= D.shape[1]:
-				# loop over the unused row indexes
-				for row in unusedRows:
-					# grab the object ID for the corresponding row
-					# index and increment the disappeared counter
-					objectID = objectIDs[row]
-					self.disappeared[objectID] += 1
+        # Sap xep hang theo khoang cach nho nhat (uu tien ghep cap gan nhat)
+        rows = D.min(axis=1).argsort()
 
-					# check to see if the number of consecutive
-					# frames the object has been marked "disappeared"
-					# for warrants deregistering the object
-					if self.disappeared[objectID] > self.maxDisappeared:
-						self.deregister(objectID)
+        # Cot ung voi khoang cach nho nhat cua tung hang
+        cols = D.argmin(axis=1)[rows]
 
-			# otherwise, if the number of input centroids is greater
-			# than the number of existing object centroids we need to
-			# register each new input centroid as a trackable object
-			else:
-				for col in unusedCols:
-					self.register(inputCentroids[col])
+        usedRows = set()
+        usedCols = set()
 
-		# return the set of trackable objects
-		return self.objects
+        for row, col in zip(rows, cols):
+            # Bo qua neu hang/cot nay da duoc ghep truoc do
+            if row in usedRows or col in usedCols:
+                continue
+
+            # Qua xa -> khong ghep
+            if D[row, col] > self.maxDistance:
+                continue
+
+            objectID = objectIDs[row]
+            self.objects[objectID] = self._as_centroid_tuple(inputCentroids[col])
+            self.disappeared[objectID] = 0
+
+            usedRows.add(row)
+            usedCols.add(col)
+
+        # Xac dinh cac hang/cot chua duoc ghep
+        unusedRows = set(range(D.shape[0])).difference(usedRows)
+        unusedCols = set(range(D.shape[1])).difference(usedCols)
+
+        # Nhieu doi tuong cu hon centroid moi -> mot so doi tuong co the da mat
+        if D.shape[0] >= D.shape[1]:
+            for row in unusedRows:
+                self._mark_missing(objectIDs[row])
+        else:
+            # Nhieu centroid moi hon doi tuong cu -> dang ky doi tuong moi
+            for col in unusedCols:
+                self.register(inputCentroids[col])
+
+        return self.objects

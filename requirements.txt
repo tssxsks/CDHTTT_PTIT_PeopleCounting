@@ -16,4 +16,4 @@ tqdm==4.65.0
 traitlets==5.9.0
 ultralytics==8.0.110
 urllib3==2.0.2
-
+deep-sort-realtime

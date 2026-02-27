@@ -148,6 +148,7 @@ def people_counter(
     fps_counter = FPS().start()
     start_time = time.time()
     frame_idx = 0
+    latencies_ms = []
 
     # Luu trang thai theo tung track ID:
     # {
@@ -187,6 +188,7 @@ def people_counter(
             active_ids = set()
 
             # Tracking person (COCO class 0)
+            t_infer = time.perf_counter()
             results = model.track(
                 frame,
                 persist=True,
@@ -195,6 +197,7 @@ def people_counter(
                 tracker=tracker_cfg,
                 verbose=False,
             )
+            latencies_ms.append((time.perf_counter() - t_infer) * 1000.0)
 
             if results and results[0].boxes is not None and results[0].boxes.id is not None:
                 boxes_tensor = results[0].boxes.xyxy
@@ -289,6 +292,7 @@ def people_counter(
         summary = {
             "elapsed_sec": fps_counter.elapsed(),
             "approx_fps": fps_counter.fps(),
+            "latency_ms": (sum(latencies_ms) / len(latencies_ms)) if latencies_ms else 0.0,
             "enter": total_down,
             "exit": total_up,
             "total": total_down + total_up,
@@ -320,6 +324,7 @@ def main():
 
     logger.info("Elapsed time: %.2f sec", summary["elapsed_sec"])
     logger.info("Approx. FPS: %.2f", summary["approx_fps"])
+    logger.info("Latency (ms/frame): %.2f", summary["latency_ms"])
     logger.info("Total Enter: %d", summary["enter"])
     logger.info("Total Exit: %d", summary["exit"])
     logger.info("Total Counted: %d", summary["total"])

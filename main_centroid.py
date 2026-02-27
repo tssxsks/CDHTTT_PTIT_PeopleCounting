@@ -172,6 +172,7 @@ def people_counter_centroid(
     fps_counter = FPS().start()
     start_time = time.time()
     frame_idx = 0
+    latencies_ms = []
 
     centroid_tracker = CentroidTracker(
         maxDisappeared=max_disappeared,
@@ -222,6 +223,7 @@ def people_counter_centroid(
             frame_idx += 1
 
             # Phat hien nguoi bang YOLOv8 (khong dung tracker tich hop)
+            t_infer = time.perf_counter()
             results = model.predict(
                 source=frame,
                 classes=[0],
@@ -238,6 +240,7 @@ def people_counter_centroid(
 
             # Cap nhat tracker centroid tu cac bbox detect duoc
             objects = centroid_tracker.update(rects)
+            latencies_ms.append((time.perf_counter() - t_infer) * 1000.0)
 
             # Tao bang tra bbox theo centroid de ve duoc box + ID
             rects_by_centroid = {}
@@ -323,6 +326,7 @@ def people_counter_centroid(
         return {
             "elapsed_sec": fps_counter.elapsed(),
             "approx_fps": fps_counter.fps(),
+            "latency_ms": (sum(latencies_ms) / len(latencies_ms)) if latencies_ms else 0.0,
             "enter": total_down,
             "exit": total_up,
             "total": total_down + total_up,
@@ -354,6 +358,7 @@ def main():
 
     logger.info("Elapsed time: %.2f sec", summary["elapsed_sec"])
     logger.info("Approx. FPS: %.2f", summary["approx_fps"])
+    logger.info("Latency (ms/frame): %.2f", summary["latency_ms"])
     logger.info("Total Enter: %d", summary["enter"])
     logger.info("Total Exit: %d", summary["exit"])
     logger.info("Total Counted: %d", summary["total"])

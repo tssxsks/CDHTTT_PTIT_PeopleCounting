@@ -164,6 +164,7 @@ def people_counter_deepsort(
     fps_counter = FPS().start()
     start_time = time.time()
     frame_idx = 0
+    latencies_ms = []
 
     track_state = {}
     total_up = 0
@@ -212,6 +213,7 @@ def people_counter_deepsort(
             active_ids = set()
 
             # Detect nguoi bang YOLOv8
+            t_infer = time.perf_counter()
             results = model.predict(
                 source=frame,
                 classes=[0],
@@ -231,6 +233,7 @@ def people_counter_deepsort(
                     deep_sort_detections.append(([x1, y1, w, h], float(det_conf), "person"))
 
             tracks = deepsort_tracker.update_tracks(deep_sort_detections, frame=frame)
+            latencies_ms.append((time.perf_counter() - t_infer) * 1000.0)
 
             for track in tracks:
                 if not track.is_confirmed():
@@ -296,6 +299,7 @@ def people_counter_deepsort(
         return {
             "elapsed_sec": fps_counter.elapsed(),
             "approx_fps": fps_counter.fps(),
+            "latency_ms": (sum(latencies_ms) / len(latencies_ms)) if latencies_ms else 0.0,
             "enter": total_down,
             "exit": total_up,
             "total": total_down + total_up,
@@ -328,6 +332,7 @@ def main():
 
     logger.info("Elapsed time: %.2f sec", summary["elapsed_sec"])
     logger.info("Approx. FPS: %.2f", summary["approx_fps"])
+    logger.info("Latency (ms/frame): %.2f", summary["latency_ms"])
     logger.info("Total Enter: %d", summary["enter"])
     logger.info("Total Exit: %d", summary["exit"])
     logger.info("Total Counted: %d", summary["total"])
